@@ -117,8 +117,8 @@ function IngestModal({ onClose, onAdded }: { onClose: () => void; onAdded: (repo
   </div>;
 }
 
-interface FilterDraft { from: string; to: string; author: string; path: string; commits: string[] }
-const emptyFilters: FilterDraft = { from: '', to: '', author: '', path: '', commits: [] };
+interface FilterDraft { from: string; to: string; author: string; path: string; commits: string }
+const emptyFilters: FilterDraft = { from: '', to: '', author: '', path: '', commits: '' };
 
 function FilterPanel({ result, draft, setDraft, apply, reset }: {
   result: AnalysisResult;
@@ -134,12 +134,11 @@ function FilterPanel({ result, draft, setDraft, apply, reset }: {
     <label><span>Author</span><select value={draft.author} onChange={(e) => setDraft({ ...draft, author: e.target.value })}>
       <option value="">All authors</option>{result.available.authors.map((author) => <option key={author.key} value={author.key}>{author.name} — {author.email}</option>)}
     </select></label>
-    <label><span>Object</span><select value={draft.path} onChange={(e) => setDraft({ ...draft, path: e.target.value })}>
-      <option value="">Entire repository</option>{result.available.paths.map((item) => <option key={`${item.kind}:${item.path}`} value={item.path}>{item.kind === 'directory' ? '▸' : '·'} {item.path}</option>)}
-    </select></label>
-    <label className="commit-select"><span>Specific commits</span><select multiple value={draft.commits} onChange={(event) => setDraft({ ...draft, commits: [...event.target.selectedOptions].map((option) => option.value) })}>
-      {result.commits.map((commit) => <option key={commit.hash} value={commit.hash}>{commit.shortHash} · {commit.subject}</option>)}
-    </select></label>
+    <label><span>Object path</span><input list="rat-path-options" value={draft.path} onChange={(e) => setDraft({ ...draft, path: e.target.value })} placeholder="Entire repository" />
+      <datalist id="rat-path-options">{result.available.paths.map((item) => <option key={`${item.kind}:${item.path}`} value={item.path}>{item.kind}</option>)}</datalist>
+      {result.available.pathsTruncated && <small>Searchable input; type any exact path.</small>}
+    </label>
+    <label className="commit-select"><span>Specific commits</span><input value={draft.commits} onChange={(event) => setDraft({ ...draft, commits: event.target.value })} placeholder="SHA prefixes, comma-separated" /></label>
     <div className="filter-actions"><button className="text-button" onClick={reset}>Reset</button><button className="primary" onClick={apply}>Apply</button></div>
   </section>;
 }
@@ -218,6 +217,10 @@ export default function App() {
   const [showFilters, setShowFilters] = useState(false);
   const [showMerge, setShowMerge] = useState(false);
   const [tab, setTab] = useState<Tab>('files');
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(100);
+  const [searchDraft, setSearchDraft] = useState('');
+  const [tableSearch, setTableSearch] = useState('');
   const [draft, setDraft] = useState<FilterDraft>(emptyFilters);
   const [activeFilters, setActiveFilters] = useState<AnalysisFilters>({});
 
@@ -240,9 +243,20 @@ export default function App() {
     if (!selectedId) { setResult(null); return; }
     let cancelled = false;
     setLoading(true); setError('');
-    api.analyze(selectedId, activeFilters).then((data) => { if (!cancelled) setResult(data); }).catch((reason) => { if (!cancelled) setError(reason.message); }).finally(() => { if (!cancelled) setLoading(false); });
+    api.analyze(selectedId, activeFilters, { view: tab, page, pageSize, query: tableSearch })
+      .then((data) => { if (!cancelled) setResult(data); })
+      .catch((reason) => { if (!cancelled) setError(reason.message); })
+      .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [selectedId, activeFilters]);
+  }, [selectedId, activeFilters, tab, page, pageSize, tableSearch]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setPage(1);
+      setTableSearch(searchDraft.trim());
+    }, 250);
+    return () => window.clearTimeout(timer);
+  }, [searchDraft]);
 
   function applyFilters() {
     const next: AnalysisFilters = {};
@@ -250,8 +264,9 @@ export default function App() {
     if (draft.to) next.to = new Date(`${draft.to}T00:00:00`).getTime() / 1000 + 86400;
     if (draft.author) next.authors = [draft.author];
     if (draft.path) next.paths = [draft.path];
-    if (draft.commits.length) next.commits = draft.commits;
-    setActiveFilters(next); setShowFilters(false);
+    const commits = draft.commits.split(/[\s,]+/).map((value) => value.trim()).filter(Boolean);
+    if (commits.length) next.commits = commits;
+    setPage(1); setActiveFilters(next); setShowFilters(false);
   }
 
   async function deleteSelected() {
@@ -261,14 +276,15 @@ export default function App() {
     setRepositories(list); setSelectedId(list[0]?.id ?? '');
   }
 
-  const topFiles = useMemo(() => result?.files.slice(0, 6) ?? [], [result]);
+  const topFiles = useMemo(() => result?.insights.files ?? [], [result]);
+  const pageInfo = result?.pages[tab];
   if (!loading && repositories.length === 0) return <><EmptyState onAdd={() => setShowIngest(true)} />{showIngest && <IngestModal onClose={() => setShowIngest(false)} onAdded={(repo) => { setShowIngest(false); setRepositories([repo]); setSelectedId(repo.id); }} />}</>;
 
   return <div className="app-shell">
     <aside className="sidebar">
       <div className="brand"><span><Icon name="branch" /></span><div><strong>RAT</strong><small>REPO ANALYTICS</small></div></div>
       <div className="repo-heading"><span>REPOSITORIES</span><button className="icon-button" onClick={() => setShowIngest(true)} aria-label="Add repository"><Icon name="plus" /></button></div>
-      <nav className="repo-list">{repositories.map((repository) => <button key={repository.id} className={selectedId === repository.id ? 'active' : ''} onClick={() => { setSelectedId(repository.id); setActiveFilters({}); setDraft(emptyFilters); }}><span className="repo-icon"><Icon name="branch" size={16} /></span><span><strong>{repository.name}</strong><small>{repository.branch} · {formatNumber(repository.commitCount)} commits</small></span></button>)}</nav>
+      <nav className="repo-list" aria-label="Repositories">{repositories.map((repository) => <button key={repository.id} className={selectedId === repository.id ? 'active' : ''} onClick={() => { setSelectedId(repository.id); setActiveFilters({}); setDraft(emptyFilters); setPage(1); setSearchDraft(''); setTableSearch(''); }}><span className="repo-icon"><Icon name="branch" size={16} /></span><span><strong>{repository.name}</strong><small>{repository.branch} · {formatNumber(repository.commitCount)} commits</small></span></button>)}</nav>
       <div className="sidebar-foot"><span className="status-dot" /> Git engine ready</div>
     </aside>
     <main className="dashboard">
@@ -278,7 +294,7 @@ export default function App() {
       </header>
       {showFilters && result && <FilterPanel result={result} draft={draft} setDraft={setDraft} apply={applyFilters} reset={() => { setDraft(emptyFilters); setActiveFilters({}); setShowFilters(false); }} />}
       {error && <div className="error-banner page-error">{error}</div>}
-      {loading || !result ? <div className="loading-state"><span className="spinner large-spinner" /><strong>Walking Git history</strong><p>Calculating changes across non-merge commits…</p></div> : <>
+      {!result ? <div className="loading-state"><span className="spinner large-spinner" /><strong>Walking Git history</strong><p>Calculating changes across non-merge commits…</p></div> : <>
         <div className="scope-line"><span>ANALYSIS SCOPE</span><strong>{formatNumber(result.commitCount)} of {formatNumber(result.totalCommitCount)} commits</strong><i /> <span>Generated {new Date(result.generatedAt).toLocaleTimeString()}</span></div>
         <section className="metrics-grid">
           <MetricCard label="Lines added" value={`+${formatNumber(result.totals.added)}`} tone="green" detail="Across selected objects" />
@@ -289,15 +305,22 @@ export default function App() {
         </section>
         <section className="insights-grid">
           <article className="panel"><div className="panel-head"><div><p className="eyebrow">VOLATILITY</p><h2>Top hotspots</h2></div><span>CHURN</span></div>{topFiles.length ? <BarList items={topFiles} kind="path" /> : <p className="no-data">No matching file changes</p>}</article>
-          <article className="panel"><div className="panel-head"><div><p className="eyebrow">OWNERSHIP</p><h2>Contributor impact</h2></div><span>CHURN</span></div>{result.authors.length ? <BarList items={result.authors} kind="author" /> : <p className="no-data">No matching authors</p>}</article>
+          <article className="panel"><div className="panel-head"><div><p className="eyebrow">OWNERSHIP</p><h2>Contributor impact</h2></div><span>CHURN</span></div>{result.insights.authors.length ? <BarList items={result.insights.authors} kind="author" /> : <p className="no-data">No matching authors</p>}</article>
         </section>
         <section className="data-panel">
-          <div className="tabs-row"><div className="tabs">{([['files', 'file', 'Files', result.files.length], ['directories', 'folder', 'Directories', result.directories.length], ['authors', 'users', 'Authors', result.authors.length], ['commits', 'commit', 'Commits', result.commitCount]] as const).map(([key, icon, label, count]) => <button key={key} className={tab === key ? 'active' : ''} onClick={() => setTab(key)}><Icon name={icon} size={16} /> {label}<span>{formatNumber(count)}</span></button>)}</div><button className="export" onClick={() => exportCsv(result, tab)}><Icon name="download" size={15} /> Export CSV</button></div>
+          <div className="tabs-row"><div className="tabs" role="tablist" aria-label="Analysis views">{([['files', 'file', 'Files', result.pages.files.total], ['directories', 'folder', 'Directories', result.pages.directories.total], ['authors', 'users', 'Authors', result.pages.authors.total], ['commits', 'commit', 'Commits', result.pages.commits.total]] as const).map(([key, icon, label, count]) => <button key={key} role="tab" aria-selected={tab === key} className={tab === key ? 'active' : ''} onClick={() => { setTab(key); setPage(1); setSearchDraft(''); setTableSearch(''); }}><Icon name={icon} size={16} /> {label}<span>{formatNumber(count)}</span></button>)}</div></div>
+          <div className="table-toolbar">
+            <label className="table-search"><span>Search {tab}</span><input type="search" value={searchDraft} onChange={(event) => setSearchDraft(event.target.value)} placeholder={`Filter ${tab}…`} /></label>
+            <label><span>Rows</span><select value={pageSize} onChange={(event) => { setPageSize(Number(event.target.value)); setPage(1); }}><option value="50">50</option><option value="100">100</option><option value="250">250</option></select></label>
+            {loading && <span className="refresh-indicator"><span className="spinner" /> Updating view…</span>}
+            <button className="export" onClick={() => exportCsv(result, tab)} title="Export the visible page"><Icon name="download" size={15} /> Export page CSV</button>
+          </div>
           <DataTable result={result} tab={tab} />
+          {pageInfo && <div className="table-pagination"><span>Showing {pageInfo.total ? (pageInfo.page - 1) * pageInfo.pageSize + 1 : 0}–{Math.min(pageInfo.page * pageInfo.pageSize, pageInfo.total)} of {formatNumber(pageInfo.total)}</span><div><button disabled={pageInfo.page === 1} onClick={() => setPage(1)}>First</button><button disabled={pageInfo.page === 1} onClick={() => setPage((current) => current - 1)}>Previous</button><strong>Page {pageInfo.page} of {pageInfo.totalPages}</strong><button disabled={pageInfo.page === pageInfo.totalPages} onClick={() => setPage((current) => current + 1)}>Next</button><button disabled={pageInfo.page === pageInfo.totalPages} onClick={() => setPage(pageInfo.totalPages)}>Last</button></div></div>}
         </section>
       </>}
     </main>
-    {showIngest && <IngestModal onClose={() => setShowIngest(false)} onAdded={(repository) => { setShowIngest(false); setRepositories((current) => [repository, ...current]); setSelectedId(repository.id); setActiveFilters({}); }} />}
+    {showIngest && <IngestModal onClose={() => setShowIngest(false)} onAdded={(repository) => { setShowIngest(false); setRepositories((current) => [repository, ...current]); setSelectedId(repository.id); setActiveFilters({}); setPage(1); setSearchDraft(''); setTableSearch(''); }} />}
     {showMerge && selectedRepository && result && <MergeModal repository={selectedRepository} result={result} onClose={() => setShowMerge(false)} onSaved={async () => { setShowMerge(false); await reloadRepositories(selectedRepository.id); setActiveFilters((current) => ({ ...current })); }} />}
   </div>;
 }

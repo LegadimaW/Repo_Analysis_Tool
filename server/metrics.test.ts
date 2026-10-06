@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { after, before, describe, it } from 'node:test';
 import { promisify } from 'node:util';
-import { analyzeRepository, parseGitLog } from './metrics.js';
+import { analyzeHistory, analyzeRepository, parseGitLog, type RawCommit } from './metrics.js';
 
 const exec = promisify(execFile);
 let repositoryPath: string;
@@ -83,5 +83,52 @@ describe('Git metric analysis', () => {
       { key: merged.authors[0].key, email: merged.authors[0].email, churn: merged.authors[0].churn, ownership: merged.authors[0].ownership },
       { key: 'Alice <alice@example.com>', email: 'alice@example.com', churn: 4, ownership: 1 },
     );
+  });
+
+  it('paginates and searches analytical tables on the server', () => {
+    const commits: RawCommit[] = Array.from({ length: 60 }, (_, index) => ({
+      hash: index.toString(16).padStart(40, '0'),
+      author: 'Scale Author',
+      email: 'scale@example.com',
+      timestamp: 1_700_000_000 + index,
+      subject: `Change ${index}`,
+      files: [{ path: `src/file-${index}.ts`, added: 1, removed: 0 }],
+    }));
+    const repository = { id: 'pagination', name: 'pagination', head: 'head', aliases: {} };
+    const page = analyzeHistory(repository, commits, {}, { view: 'files', page: 2, pageSize: 25 });
+    assert.equal(page.pages.files.total, 60);
+    assert.equal(page.pages.files.page, 2);
+    assert.equal(page.files.length, 25);
+
+    const searched = analyzeHistory(repository, commits, {}, { view: 'files', query: 'file-42' });
+    assert.equal(searched.pages.files.total, 1);
+    assert.equal(searched.files[0].path, 'src/file-42.ts');
+  });
+
+  it('keeps a 100,000-commit analysis bounded and interactive', { timeout: 30_000 }, () => {
+    const commits: RawCommit[] = Array.from({ length: 100_000 }, (_, index) => ({
+      hash: index.toString(16).padStart(40, '0'),
+      author: `Author ${index % 50}`,
+      email: `author-${index % 50}@example.com`,
+      timestamp: 1_600_000_000 + index,
+      subject: `Synthetic change ${index}`,
+      files: [{ path: `packages/pkg-${index % 100}/src/file-${index % 1000}.ts`, added: 1, removed: index % 3 }],
+    }));
+    const started = performance.now();
+    const result = analyzeHistory(
+      { id: 'scale', name: 'scale', head: 'head', aliases: {} },
+      commits,
+      {},
+      { view: 'commits', page: 400, pageSize: 250 },
+    );
+    const elapsed = performance.now() - started;
+
+    assert.equal(result.commitCount, 100_000);
+    assert.equal(result.pages.commits.total, 100_000);
+    assert.equal(result.pages.commits.page, 400);
+    assert.equal(result.commits.length, 250);
+    assert.equal(result.totals.added, 100_000);
+    assert.ok(Buffer.byteLength(JSON.stringify(result)) < 1_000_000, 'paginated payload should stay below 1 MB');
+    assert.ok(elapsed < 15_000, `100k analysis took ${elapsed.toFixed(0)} ms`);
   });
 });

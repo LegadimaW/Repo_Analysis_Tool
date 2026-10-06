@@ -3,7 +3,7 @@ import express from 'express';
 import multer from 'multer';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { AnalysisFilters } from '../shared/types.js';
+import type { AnalysisFilters, AnalysisRequest } from '../shared/types.js';
 import { analyzeRepository } from './metrics.js';
 import { RepositoryStore } from './repository-store.js';
 
@@ -45,8 +45,16 @@ app.post('/api/repositories/upload', upload.single('repository'), async (request
 
 app.post('/api/repositories/:id/analyze', async (request, response) => {
   const repository = store.get(request.params.id);
-  const filters = (request.body ?? {}) as AnalysisFilters;
-  const result = await analyzeRepository(repository, filters);
+  const body = (request.body ?? {}) as AnalysisRequest & AnalysisFilters;
+  // Accept the original flat filter body as well as the paginated request envelope.
+  const filters = body.filters ?? {
+    from: body.from,
+    to: body.to,
+    commits: body.commits,
+    authors: body.authors,
+    paths: body.paths,
+  };
+  const result = await analyzeRepository(repository, filters, body.table);
   return response.json(result);
 });
 

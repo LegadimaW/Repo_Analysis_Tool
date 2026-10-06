@@ -1,4 +1,4 @@
-import type { AnalysisFilters, AnalysisResult, ApiError, RepositorySummary } from '../shared/types';
+import type { AnalysisFilters, AnalysisResult, AnalysisTableRequest, ApiError, RepositorySummary } from '../shared/types';
 
 async function request<T>(url: string, options?: RequestInit): Promise<T> {
   const response = await fetch(url, options);
@@ -30,12 +30,12 @@ export const api = {
     return request<RepositorySummary>('/api/repositories/upload', { method: 'POST', body });
   },
 
-  analyze: (id: string, filters: AnalysisFilters = {}) => request<AnalysisResult>(
+  analyze: (id: string, filters: AnalysisFilters = {}, table: AnalysisTableRequest = {}) => request<AnalysisResult>(
     `/api/repositories/${id}/analyze`,
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(filters),
+      body: JSON.stringify({ filters, table }),
     },
   ),
 

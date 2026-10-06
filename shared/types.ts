@@ -41,6 +41,27 @@ export interface AnalysisFilters {
   paths?: string[];
 }
 
+export type AnalysisView = 'files' | 'directories' | 'authors' | 'commits';
+
+export interface AnalysisTableRequest {
+  view?: AnalysisView;
+  page?: number;
+  pageSize?: number;
+  query?: string;
+}
+
+export interface AnalysisRequest {
+  filters?: AnalysisFilters;
+  table?: AnalysisTableRequest;
+}
+
+export interface AnalysisPageInfo {
+  page: number;
+  pageSize: number;
+  total: number;
+  totalPages: number;
+}
+
 export interface AnalysisResult {
   repositoryId: string;
   repositoryName: string;
@@ -52,9 +73,16 @@ export interface AnalysisResult {
   directories: ObjectMetric[];
   authors: AuthorMetric[];
   commits: CommitInfo[];
+  insights: {
+    files: ObjectMetric[];
+    authors: AuthorMetric[];
+  };
+  pages: Record<AnalysisView, AnalysisPageInfo>;
   available: {
     authors: Array<{ key: string; name: string; email: string }>;
     paths: Array<{ path: string; kind: 'file' | 'directory' }>;
+    pathCount: number;
+    pathsTruncated: boolean;
     dateRange: { from: number; to: number } | null;
   };
 }
