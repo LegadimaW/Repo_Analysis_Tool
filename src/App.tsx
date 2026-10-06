@@ -10,7 +10,8 @@ import type {
 import { api } from './api';
 
 type Tab = 'files' | 'directories' | 'authors' | 'commits';
-type IconName = 'branch' | 'plus' | 'upload' | 'github' | 'filter' | 'merge' | 'trash' | 'file' | 'folder' | 'users' | 'commit' | 'x' | 'download';
+type View = 'home' | 'import' | 'analysis';
+type IconName = 'branch' | 'plus' | 'upload' | 'github' | 'filter' | 'merge' | 'trash' | 'file' | 'folder' | 'users' | 'commit' | 'x' | 'download' | 'arrow-left' | 'home' | 'arrow-right' | 'zip';
 
 const icons: Record<IconName, ReactNode> = {
   branch: <><path d="M6 3v12"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="6" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></>,
@@ -26,6 +27,10 @@ const icons: Record<IconName, ReactNode> = {
   commit: <><circle cx="12" cy="12" r="3"/><path d="M3 12h6m6 0h6"/></>,
   x: <><path d="m6 6 12 12M18 6 6 18"/></>,
   download: <><path d="M12 4v12m0 0 5-5m-5 5-5-5"/><path d="M5 20h14"/></>,
+  'arrow-left': <><path d="M19 12H5m0 0 6-6m-6 6 6 6"/></>,
+  'arrow-right': <><path d="M5 12h14m0 0-6-6m6 6-6 6"/></>,
+  home: <><path d="M4 10 12 3l8 7"/><path d="M6 9v11h12V9"/></>,
+  zip: <><path d="M6 3h8l4 4v14H6z"/><path d="M14 3v5h5"/><path d="M11 10h2M11 13h2M11 16h2"/></>,
 };
 
 function Icon({ name, size = 18 }: { name: IconName; size?: number }) {
@@ -53,22 +58,36 @@ function MetricCard({ label, value, tone, detail }: { label: string; value: stri
   </article>;
 }
 
-function EmptyState({ onAdd }: { onAdd: () => void }) {
-  return <main className="empty-state">
-    <div className="empty-orbit"><Icon name="branch" size={38} /></div>
-    <p className="eyebrow">REPOSITORY INTELLIGENCE</p>
-    <h1>See the story inside<br />every commit.</h1>
-    <p>Import a Git repository to uncover ownership, hotspots, churn, growth, and the people shaping the codebase.</p>
-    <button className="primary large" onClick={onAdd}><Icon name="plus" /> Analyze a repository</button>
-    <div className="feature-row"><span>Deep history</span><i /><span>Rename aware</span><i /><span>Author mapping</span></div>
-  </main>;
+/** Shared top navigation bar: brand (always jumps home) plus an optional explicit back control. */
+function TopNav({ onHome, onBack, backLabel }: { onHome: () => void; onBack?: () => void; backLabel?: string }) {
+  return <div className="top-nav">
+    <button className="brand-link" onClick={onHome}>
+      <span className="brand-mark"><Icon name="branch" /></span>
+      <div><strong>RAT</strong><small>REPO ANALYTICS</small></div>
+    </button>
+    {onBack && <button className="back-button" onClick={onBack}><Icon name="arrow-left" size={15} /> {backLabel ?? 'Back'}</button>}
+  </div>;
 }
 
-function IngestModal({ onClose, onAdded }: { onClose: () => void; onAdded: (repository: RepositorySummary) => void }) {
+function RepoCard({ repository, onOpen, onDelete }: { repository: RepositorySummary; onOpen: () => void; onDelete: () => void }) {
+  return <article className="repo-card" onClick={onOpen}>
+    <div className="repo-card-top">
+      <span className="repo-card-icon"><Icon name={repository.source === 'zip' ? 'zip' : 'github'} size={18} /></span>
+      <button className="icon-button danger ghost" title="Remove repository" onClick={(event) => { event.stopPropagation(); onDelete(); }}><Icon name="trash" size={14} /></button>
+    </div>
+    <strong className="repo-card-name" title={repository.name}>{repository.name}</strong>
+    <p className="repo-card-meta"><Icon name="branch" size={12} /> {repository.branch} <code>{repository.head.slice(0, 7)}</code></p>
+    <div className="repo-card-foot">
+      <span>{formatNumber(repository.commitCount)} commits</span>
+      <span className="repo-card-open">Open <Icon name="arrow-right" size={13} /></span>
+    </div>
+  </article>;
+}
+
+function ImportForm({ busy, setBusy, onAdded }: { busy: boolean; setBusy: (value: boolean) => void; onAdded: (repository: RepositorySummary) => void }) {
   const [mode, setMode] = useState<'url' | 'zip'>('url');
   const [url, setUrl] = useState('');
   const [file, setFile] = useState<File | null>(null);
-  const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
   async function submit(event: FormEvent) {
@@ -87,34 +106,31 @@ function IngestModal({ onClose, onAdded }: { onClose: () => void; onAdded: (repo
     }
   }
 
-  return <div className="modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
-    <section className="modal">
-      <button className="icon-button modal-close" onClick={onClose} aria-label="Close"><Icon name="x" /></button>
-      <p className="eyebrow">ADD REPOSITORY</p>
-      <h2>Bring in a codebase</h2>
-      <p className="modal-copy">RAT analyses the complete non-merge history from HEAD.</p>
-      <div className="segmented">
-        <button className={mode === 'url' ? 'active' : ''} onClick={() => setMode('url')}><Icon name="github" /> Clone URL</button>
-        <button className={mode === 'zip' ? 'active' : ''} onClick={() => setMode('zip')}><Icon name="upload" /> Upload ZIP</button>
-      </div>
-      <form onSubmit={submit}>
-        {mode === 'url' ? <label className="field">
-          <span>Public Git URL</span>
-          <input type="url" value={url} onChange={(event) => setUrl(event.target.value)} placeholder="https://github.com/owner/repository.git" required autoFocus />
-          <small>The repository is deeply cloned, including its full reachable history.</small>
-        </label> : <label className="drop-zone">
-          <input type="file" accept=".zip,application/zip" onChange={(event) => setFile(event.target.files?.[0] ?? null)} required />
-          <Icon name="upload" size={28} />
-          <strong>{file?.name ?? 'Choose a repository archive'}</strong>
-          <span>The ZIP must include its .git directory</span>
-        </label>}
-        {error && <div className="error-banner">{error}</div>}
-        <button className="primary submit" disabled={busy || (mode === 'url' ? !url : !file)}>
-          {busy ? <><span className="spinner" /> Importing full history…</> : <><Icon name="branch" /> Import and analyze</>}
-        </button>
-      </form>
-    </section>
-  </div>;
+  return <section className="import-card">
+    <p className="eyebrow">ADD REPOSITORY</p>
+    <h2>Bring in a codebase</h2>
+    <p className="modal-copy">RAT analyses the complete non-merge history from HEAD, including renames and binary exclusions.</p>
+    <div className="segmented">
+      <button type="button" className={mode === 'url' ? 'active' : ''} onClick={() => setMode('url')}><Icon name="github" /> Clone URL</button>
+      <button type="button" className={mode === 'zip' ? 'active' : ''} onClick={() => setMode('zip')}><Icon name="upload" /> Upload ZIP</button>
+    </div>
+    <form onSubmit={submit}>
+      {mode === 'url' ? <label className="field">
+        <span>Public Git URL</span>
+        <input type="url" value={url} onChange={(event) => setUrl(event.target.value)} placeholder="https://github.com/owner/repository.git" required autoFocus />
+        <small>The repository is deeply cloned, including its full reachable history.</small>
+      </label> : <label className="drop-zone">
+        <input type="file" accept=".zip,application/zip" onChange={(event) => setFile(event.target.files?.[0] ?? null)} required />
+        <Icon name="upload" size={28} />
+        <strong>{file?.name ?? 'Choose a repository archive'}</strong>
+        <span>The ZIP must include its .git directory</span>
+      </label>}
+      {error && <div className="error-banner">{error}</div>}
+      <button className="primary submit" disabled={busy || (mode === 'url' ? !url : !file)}>
+        {busy ? <><span className="spinner" /> Importing full history…</> : <><Icon name="branch" /> Import and analyze</>}
+      </button>
+    </form>
+  </section>;
 }
 
 interface FilterDraft { from: string; to: string; author: string; path: string; commits: string }
@@ -208,12 +224,14 @@ function DataTable({ result, tab }: { result: AnalysisResult; tab: Tab }) {
 }
 
 export default function App() {
+  const [view, setView] = useState<View>('home');
   const [repositories, setRepositories] = useState<RepositorySummary[]>([]);
   const [selectedId, setSelectedId] = useState('');
   const [result, setResult] = useState<AnalysisResult | null>(null);
   const [loading, setLoading] = useState(true);
+  const [initialLoad, setInitialLoad] = useState(true);
   const [error, setError] = useState('');
-  const [showIngest, setShowIngest] = useState(false);
+  const [importBusy, setImportBusy] = useState(false);
   const [showFilters, setShowFilters] = useState(false);
   const [showMerge, setShowMerge] = useState(false);
   const [tab, setTab] = useState<Tab>('files');
@@ -227,20 +245,14 @@ export default function App() {
   const selectedRepository = repositories.find((repository) => repository.id === selectedId);
   const filterCount = Object.values(activeFilters).filter((value) => Array.isArray(value) ? value.length : value !== undefined).length;
 
-  async function reloadRepositories(preferredId?: string) {
-    const list = await api.listRepositories();
-    setRepositories(list);
-    setSelectedId(preferredId ?? selectedId ?? list[0]?.id ?? '');
-  }
-
   useEffect(() => {
     api.listRepositories().then((list) => {
-      setRepositories(list); setSelectedId(list[0]?.id ?? ''); setLoading(false);
-    }).catch((reason) => { setError(reason.message); setLoading(false); });
+      setRepositories(list); setInitialLoad(false);
+    }).catch((reason) => { setError(reason.message); setInitialLoad(false); });
   }, []);
 
   useEffect(() => {
-    if (!selectedId) { setResult(null); return; }
+    if (view !== 'analysis' || !selectedId) return;
     let cancelled = false;
     setLoading(true); setError('');
     api.analyze(selectedId, activeFilters, { view: tab, page, pageSize, query: tableSearch })
@@ -248,7 +260,7 @@ export default function App() {
       .catch((reason) => { if (!cancelled) setError(reason.message); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [selectedId, activeFilters, tab, page, pageSize, tableSearch]);
+  }, [view, selectedId, activeFilters, tab, page, pageSize, tableSearch]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -257,6 +269,30 @@ export default function App() {
     }, 250);
     return () => window.clearTimeout(timer);
   }, [searchDraft]);
+
+  function resetView() {
+    setActiveFilters({}); setDraft(emptyFilters); setPage(1); setSearchDraft(''); setTableSearch(''); setTab('files'); setShowFilters(false);
+  }
+
+  function openRepository(id: string) {
+    setSelectedId(id);
+    setResult(null);
+    resetView();
+    setView('analysis');
+  }
+
+  function goHome() {
+    setView('home');
+  }
+
+  function openImport() {
+    setView('import');
+  }
+
+  function handleImported(repository: RepositorySummary) {
+    setRepositories((current) => [repository, ...current.filter((item) => item.id !== repository.id)]);
+    openRepository(repository.id);
+  }
 
   function applyFilters() {
     const next: AnalysisFilters = {};
@@ -269,58 +305,98 @@ export default function App() {
     setPage(1); setActiveFilters(next); setShowFilters(false);
   }
 
-  async function deleteSelected() {
-    if (!selectedRepository || !window.confirm(`Remove ${selectedRepository.name} from RAT?`)) return;
-    await api.deleteRepository(selectedRepository.id);
-    const list = repositories.filter((repository) => repository.id !== selectedRepository.id);
-    setRepositories(list); setSelectedId(list[0]?.id ?? '');
+  async function deleteRepository(id: string) {
+    const repository = repositories.find((item) => item.id === id);
+    if (!repository || !window.confirm(`Remove ${repository.name} from RAT?`)) return;
+    await api.deleteRepository(id);
+    setRepositories((current) => current.filter((item) => item.id !== id));
+    if (selectedId === id) { setSelectedId(''); setResult(null); setView('home'); }
   }
 
   const topFiles = useMemo(() => result?.insights.files ?? [], [result]);
   const pageInfo = result?.pages[tab];
-  if (!loading && repositories.length === 0) return <><EmptyState onAdd={() => setShowIngest(true)} />{showIngest && <IngestModal onClose={() => setShowIngest(false)} onAdded={(repo) => { setShowIngest(false); setRepositories([repo]); setSelectedId(repo.id); }} />}</>;
 
-  return <div className="app-shell">
-    <aside className="sidebar">
-      <div className="brand"><span><Icon name="branch" /></span><div><strong>RAT</strong><small>REPO ANALYTICS</small></div></div>
-      <div className="repo-heading"><span>REPOSITORIES</span><button className="icon-button" onClick={() => setShowIngest(true)} aria-label="Add repository"><Icon name="plus" /></button></div>
-      <nav className="repo-list" aria-label="Repositories">{repositories.map((repository) => <button key={repository.id} className={selectedId === repository.id ? 'active' : ''} onClick={() => { setSelectedId(repository.id); setActiveFilters({}); setDraft(emptyFilters); setPage(1); setSearchDraft(''); setTableSearch(''); }}><span className="repo-icon"><Icon name="branch" size={16} /></span><span><strong>{repository.name}</strong><small>{repository.branch} · {formatNumber(repository.commitCount)} commits</small></span></button>)}</nav>
-      <div className="sidebar-foot"><span className="status-dot" /> Git engine ready</div>
-    </aside>
-    <main className="dashboard">
-      <header className="topbar">
-        <div><div className="breadcrumb">Repositories <span>/</span> Analysis</div><h1>{selectedRepository?.name ?? 'Repository'}</h1><p><Icon name="branch" size={14} /> {selectedRepository?.branch} <code>{selectedRepository?.head.slice(0, 8)}</code></p></div>
-        <div className="top-actions"><button className="secondary" onClick={() => setShowMerge(true)} disabled={!result}><Icon name="merge" /> Merge authors</button><button className={`secondary ${filterCount ? 'has-filter' : ''}`} onClick={() => setShowFilters((open) => !open)}><Icon name="filter" /> Filters {filterCount > 0 && <b>{filterCount}</b>}</button><button className="icon-button danger" onClick={deleteSelected} title="Remove repository"><Icon name="trash" /></button></div>
-      </header>
-      {showFilters && result && <FilterPanel result={result} draft={draft} setDraft={setDraft} apply={applyFilters} reset={() => { setDraft(emptyFilters); setActiveFilters({}); setShowFilters(false); }} />}
-      {error && <div className="error-banner page-error">{error}</div>}
-      {!result ? <div className="loading-state"><span className="spinner large-spinner" /><strong>Walking Git history</strong><p>Calculating changes across non-merge commits…</p></div> : <>
-        <div className="scope-line"><span>ANALYSIS SCOPE</span><strong>{formatNumber(result.commitCount)} of {formatNumber(result.totalCommitCount)} commits</strong><i /> <span>Generated {new Date(result.generatedAt).toLocaleTimeString()}</span></div>
-        <section className="metrics-grid">
-          <MetricCard label="Lines added" value={`+${formatNumber(result.totals.added)}`} tone="green" detail="Across selected objects" />
-          <MetricCard label="Lines removed" value={`−${formatNumber(result.totals.removed)}`} tone="red" detail="Across selected objects" />
-          <MetricCard label="Net growth" value={`${result.totals.growth > 0 ? '+' : ''}${formatNumber(result.totals.growth)}`} tone="blue" detail="Added minus removed" />
-          <MetricCard label="Code churn" value={formatNumber(result.totals.churn)} tone="amber" detail={`${formatNumber(result.totals.churnRate)} per commit`} />
-          <MetricCard label="Modifications" value={formatNumber(result.totals.modifications)} tone="violet" detail={`${metricValue(result.totals, 'modificationFrequency')} frequency`} />
-        </section>
-        <section className="insights-grid">
-          <article className="panel"><div className="panel-head"><div><p className="eyebrow">VOLATILITY</p><h2>Top hotspots</h2></div><span>CHURN</span></div>{topFiles.length ? <BarList items={topFiles} kind="path" /> : <p className="no-data">No matching file changes</p>}</article>
-          <article className="panel"><div className="panel-head"><div><p className="eyebrow">OWNERSHIP</p><h2>Contributor impact</h2></div><span>CHURN</span></div>{result.insights.authors.length ? <BarList items={result.insights.authors} kind="author" /> : <p className="no-data">No matching authors</p>}</article>
-        </section>
-        <section className="data-panel">
-          <div className="tabs-row"><div className="tabs" role="tablist" aria-label="Analysis views">{([['files', 'file', 'Files', result.pages.files.total], ['directories', 'folder', 'Directories', result.pages.directories.total], ['authors', 'users', 'Authors', result.pages.authors.total], ['commits', 'commit', 'Commits', result.pages.commits.total]] as const).map(([key, icon, label, count]) => <button key={key} role="tab" aria-selected={tab === key} className={tab === key ? 'active' : ''} onClick={() => { setTab(key); setPage(1); setSearchDraft(''); setTableSearch(''); }}><Icon name={icon} size={16} /> {label}<span>{formatNumber(count)}</span></button>)}</div></div>
-          <div className="table-toolbar">
-            <label className="table-search"><span>Search {tab}</span><input type="search" value={searchDraft} onChange={(event) => setSearchDraft(event.target.value)} placeholder={`Filter ${tab}…`} /></label>
-            <label><span>Rows</span><select value={pageSize} onChange={(event) => { setPageSize(Number(event.target.value)); setPage(1); }}><option value="50">50</option><option value="100">100</option><option value="250">250</option></select></label>
-            {loading && <span className="refresh-indicator"><span className="spinner" /> Updating view…</span>}
-            <button className="export" onClick={() => exportCsv(result, tab)} title="Export the visible page"><Icon name="download" size={15} /> Export page CSV</button>
+  if (view === 'import') {
+    return <main className="page import-page">
+      <TopNav onHome={goHome} onBack={goHome} backLabel="Back to repositories" />
+      <div className="page-center"><ImportForm busy={importBusy} setBusy={setImportBusy} onAdded={handleImported} /></div>
+    </main>;
+  }
+
+  if (view === 'analysis') {
+    return <div className="page analysis-page">
+      <TopNav onHome={goHome} onBack={goHome} backLabel="All repositories" />
+      <main className="dashboard">
+        <header className="topbar">
+          <div><div className="breadcrumb"><button className="link-button" onClick={goHome}>Repositories</button> <span>/</span> Analysis</div><h1>{selectedRepository?.name ?? 'Repository'}</h1><p><Icon name="branch" size={14} /> {selectedRepository?.branch} <code>{selectedRepository?.head.slice(0, 8)}</code></p></div>
+          <div className="top-actions">
+            {repositories.length > 1 && <select className="repo-switcher" value={selectedId} onChange={(event) => openRepository(event.target.value)} aria-label="Switch repository">
+              {repositories.map((repository) => <option key={repository.id} value={repository.id}>{repository.name}</option>)}
+            </select>}
+            <button className="secondary" onClick={() => setShowMerge(true)} disabled={!result}><Icon name="merge" /> Merge authors</button>
+            <button className={`secondary ${filterCount ? 'has-filter' : ''}`} onClick={() => setShowFilters((open) => !open)}><Icon name="filter" /> Filters {filterCount > 0 && <b>{filterCount}</b>}</button>
+            <button className="icon-button danger" onClick={() => selectedRepository && deleteRepository(selectedRepository.id)} title="Remove repository"><Icon name="trash" /></button>
           </div>
-          <DataTable result={result} tab={tab} />
-          {pageInfo && <div className="table-pagination"><span>Showing {pageInfo.total ? (pageInfo.page - 1) * pageInfo.pageSize + 1 : 0}–{Math.min(pageInfo.page * pageInfo.pageSize, pageInfo.total)} of {formatNumber(pageInfo.total)}</span><div><button disabled={pageInfo.page === 1} onClick={() => setPage(1)}>First</button><button disabled={pageInfo.page === 1} onClick={() => setPage((current) => current - 1)}>Previous</button><strong>Page {pageInfo.page} of {pageInfo.totalPages}</strong><button disabled={pageInfo.page === pageInfo.totalPages} onClick={() => setPage((current) => current + 1)}>Next</button><button disabled={pageInfo.page === pageInfo.totalPages} onClick={() => setPage(pageInfo.totalPages)}>Last</button></div></div>}
-        </section>
-      </>}
-    </main>
-    {showIngest && <IngestModal onClose={() => setShowIngest(false)} onAdded={(repository) => { setShowIngest(false); setRepositories((current) => [repository, ...current]); setSelectedId(repository.id); setActiveFilters({}); setPage(1); setSearchDraft(''); setTableSearch(''); }} />}
-    {showMerge && selectedRepository && result && <MergeModal repository={selectedRepository} result={result} onClose={() => setShowMerge(false)} onSaved={async () => { setShowMerge(false); await reloadRepositories(selectedRepository.id); setActiveFilters((current) => ({ ...current })); }} />}
-  </div>;
+        </header>
+        {showFilters && result && <FilterPanel result={result} draft={draft} setDraft={setDraft} apply={applyFilters} reset={() => { setDraft(emptyFilters); setActiveFilters({}); setShowFilters(false); }} />}
+        {error && <div className="error-banner page-error">{error}</div>}
+        {!result ? <div className="loading-state"><span className="spinner large-spinner" /><strong>Walking Git history</strong><p>Calculating changes across non-merge commits…</p></div> : <>
+          <div className="scope-line"><span>ANALYSIS SCOPE</span><strong>{formatNumber(result.commitCount)} of {formatNumber(result.totalCommitCount)} commits</strong><i /> <span>Generated {new Date(result.generatedAt).toLocaleTimeString()}</span></div>
+          <section className="metrics-grid">
+            <MetricCard label="Lines added" value={`+${formatNumber(result.totals.added)}`} tone="green" detail="Across selected objects" />
+            <MetricCard label="Lines removed" value={`−${formatNumber(result.totals.removed)}`} tone="red" detail="Across selected objects" />
+            <MetricCard label="Net growth" value={`${result.totals.growth > 0 ? '+' : ''}${formatNumber(result.totals.growth)}`} tone="blue" detail="Added minus removed" />
+            <MetricCard label="Code churn" value={formatNumber(result.totals.churn)} tone="amber" detail={`${formatNumber(result.totals.churnRate)} per commit`} />
+            <MetricCard label="Modifications" value={formatNumber(result.totals.modifications)} tone="violet" detail={`${metricValue(result.totals, 'modificationFrequency')} frequency`} />
+          </section>
+          <section className="insights-grid">
+            <article className="panel"><div className="panel-head"><div><p className="eyebrow">VOLATILITY</p><h2>Top hotspots</h2></div><span>CHURN</span></div>{topFiles.length ? <BarList items={topFiles} kind="path" /> : <p className="no-data">No matching file changes</p>}</article>
+            <article className="panel"><div className="panel-head"><div><p className="eyebrow">OWNERSHIP</p><h2>Contributor impact</h2></div><span>CHURN</span></div>{result.insights.authors.length ? <BarList items={result.insights.authors} kind="author" /> : <p className="no-data">No matching authors</p>}</article>
+          </section>
+          <section className="data-panel">
+            <div className="tabs-row"><div className="tabs" role="tablist" aria-label="Analysis views">{([['files', 'file', 'Files', result.pages.files.total], ['directories', 'folder', 'Directories', result.pages.directories.total], ['authors', 'users', 'Authors', result.pages.authors.total], ['commits', 'commit', 'Commits', result.pages.commits.total]] as const).map(([key, icon, label, count]) => <button key={key} role="tab" aria-selected={tab === key} className={tab === key ? 'active' : ''} onClick={() => { setTab(key); setPage(1); setSearchDraft(''); setTableSearch(''); }}><Icon name={icon} size={16} /> {label}<span>{formatNumber(count)}</span></button>)}</div></div>
+            <div className="table-toolbar">
+              <label className="table-search"><span>Search {tab}</span><input type="search" value={searchDraft} onChange={(event) => setSearchDraft(event.target.value)} placeholder={`Filter ${tab}…`} /></label>
+              <label><span>Rows</span><select value={pageSize} onChange={(event) => { setPageSize(Number(event.target.value)); setPage(1); }}><option value="50">50</option><option value="100">100</option><option value="250">250</option></select></label>
+              {loading && <span className="refresh-indicator"><span className="spinner" /> Updating view…</span>}
+              <button className="export" onClick={() => exportCsv(result, tab)} title="Export the visible page"><Icon name="download" size={15} /> Export page CSV</button>
+            </div>
+            <DataTable result={result} tab={tab} />
+            {pageInfo && <div className="table-pagination"><span>Showing {pageInfo.total ? (pageInfo.page - 1) * pageInfo.pageSize + 1 : 0}–{Math.min(pageInfo.page * pageInfo.pageSize, pageInfo.total)} of {formatNumber(pageInfo.total)}</span><div><button disabled={pageInfo.page === 1} onClick={() => setPage(1)}>First</button><button disabled={pageInfo.page === 1} onClick={() => setPage((current) => current - 1)}>Previous</button><strong>Page {pageInfo.page} of {pageInfo.totalPages}</strong><button disabled={pageInfo.page === pageInfo.totalPages} onClick={() => setPage((current) => current + 1)}>Next</button><button disabled={pageInfo.page === pageInfo.totalPages} onClick={() => setPage(pageInfo.totalPages)}>Last</button></div></div>}
+          </section>
+        </>}
+      </main>
+      {showMerge && selectedRepository && result && <MergeModal repository={selectedRepository} result={result} onClose={() => setShowMerge(false)} onSaved={async () => { setShowMerge(false); const list = await api.listRepositories(); setRepositories(list); setActiveFilters((current) => ({ ...current })); }} />}
+    </div>;
+  }
+
+  // Home: the start page. Shows a welcome hero plus every imported repository as an open-able card.
+  if (initialLoad) {
+    return <main className="page home-page"><div className="loading-state"><span className="spinner large-spinner" /><strong>Loading workspace</strong></div></main>;
+  }
+
+  return <main className="page home-page">
+    <div className="top-nav"><button className="brand-link" onClick={goHome}><span className="brand-mark"><Icon name="branch" /></span><div><strong>RAT</strong><small>REPO ANALYTICS</small></div></button></div>
+    {repositories.length === 0 ? (
+      <div className="empty-state">
+        <div className="empty-orbit"><Icon name="branch" size={38} /></div>
+        <p className="eyebrow">REPOSITORY INTELLIGENCE</p>
+        <h1>See the story inside<br />every commit.</h1>
+        <p>Import a Git repository to uncover ownership, hotspots, churn, growth, and the people shaping the codebase.</p>
+        <button className="primary large" onClick={openImport}><Icon name="plus" /> Analyze a repository</button>
+        <div className="feature-row"><span>Deep history</span><i /><span>Rename aware</span><i /><span>Author mapping</span></div>
+      </div>
+    ) : (
+      <div className="home-body">
+        <header className="home-header">
+          <div><p className="eyebrow">YOUR WORKSPACE</p><h1>Repositories</h1><p className="home-subtitle">Pick a repository to open its dashboard, or import another one.</p></div>
+          <button className="primary large" onClick={openImport}><Icon name="plus" /> Add repository</button>
+        </header>
+        {error && <div className="error-banner page-error">{error}</div>}
+        <div className="repo-grid">
+          {repositories.map((repository) => <RepoCard key={repository.id} repository={repository} onOpen={() => openRepository(repository.id)} onDelete={() => deleteRepository(repository.id)} />)}
+        </div>
+      </div>
+    )}
+  </main>;
 }
