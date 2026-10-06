@@ -1,0 +1,8 @@
+node_modules/
+dist/
+.rat-data/
+*.log
+.env
+.DS_Store
+/test_brief.pdf
+/repo-references/
