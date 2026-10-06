@@ -36,11 +36,14 @@ function safeRepositoryName(value: string): string {
 
 async function locateGitRoot(directory: string, depth = 0): Promise<string | null> {
   if (depth > 4) return null;
+  const { access, readdir } = await import('node:fs/promises');
+  // Check for a literal `.git` entry (directory or gitlink file) rather than running
+  // `git rev-parse`, which walks up parent directories and can match an unrelated
+  // enclosing repository (e.g. when the server itself runs inside a Git checkout).
   try {
-    await git(directory, ['rev-parse', '--git-dir']);
+    await access(path.join(directory, '.git'));
     return directory;
   } catch {
-    const { readdir } = await import('node:fs/promises');
     const entries = await readdir(directory, { withFileTypes: true });
     for (const entry of entries) {
       if (entry.isDirectory() && entry.name !== '__MACOSX') {
